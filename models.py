@@ -2,6 +2,41 @@
 
 import numpy as np
 import collections
+import torch
+import torch.nn as nn
+import os
+
+
+
+#####################
+# DATA LOADING FUNCTION
+#####################
+
+import os
+
+def load_data_from_folder(folder_path):
+    all_text = ""
+    for filename in os.listdir(folder_path):
+        file_path = os.path.join(folder_path, filename)
+        if filename.endswith(".txt"):  # Make sure it's a text file
+            with open(file_path, 'r', encoding='utf-8') as file:
+                all_text += file.read() + "\n"  # Add content from the file
+    return all_text
+
+# Now you can use this function to load data from your folder
+folder_path = r"C:\Users\HP\OneDrive\Desktop\DL research paper\Deep Learning\data"  # Use raw string for Windows path
+data = load_data_from_folder(folder_path)  # Pass folder_path to the function
+
+# Optionally, print the total length of the data
+print(f"Total length of data: {len(data)} characters")
+
+
+
+
+
+
+
+
 
 #####################
 # MODELS FOR PART 1 #
