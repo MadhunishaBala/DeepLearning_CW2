@@ -1,14 +1,10 @@
-# utils.py
-
+import numpy as np
+from collections import Counter
 
 class Indexer(object):
     """
     Bijection between objects and integers starting at 0. Useful for mapping
     labels, features, etc. into coordinates of a vector space.
-
-    Attributes:
-        objs_to_ints
-        ints_to_objs
     """
     def __init__(self):
         self.objs_to_ints = {}
@@ -28,7 +24,7 @@ class Indexer(object):
         :param index: integer index to look up
         :return: Returns the object corresponding to the particular index or None if not found
         """
-        if (index not in self.ints_to_objs):
+        if index not in self.ints_to_objs:
             return None
         else:
             return self.ints_to_objs[index]
@@ -45,7 +41,7 @@ class Indexer(object):
         :param object: object to look up
         :return: Returns -1 if the object isn't present, index otherwise
         """
-        if (object not in self.objs_to_ints):
+        if object not in self.objs_to_ints:
             return -1
         else:
             return self.objs_to_ints[object]
@@ -59,117 +55,36 @@ class Indexer(object):
         """
         if not add:
             return self.index_of(object)
-        if (object not in self.objs_to_ints):
+        if object not in self.objs_to_ints:
             new_idx = len(self.objs_to_ints)
             self.objs_to_ints[object] = new_idx
             self.ints_to_objs[new_idx] = object
         return self.objs_to_ints[object]
 
 
-class Beam(object):
+def get_frequency_features(examples):
     """
-    Beam data structure. Maintains a list of scored elements like a Counter, but only keeps the top n
-    elements after every insertion operation. Insertion is O(n) (list is maintained in
-    sorted order), access is O(1). Still fast enough for practical purposes for small beams.
+    Convert a list of text examples into frequency-based features.
+    :param examples: List of text examples (strings)
+    :return: NumPy array of feature vectors where each feature is the frequency of a character
     """
-    def __init__(self, size):
-        self.size = size
-        self.elts = []
-        self.scores = []
+    # Define the list of characters that will be used in the feature vector
+    all_chars = 'abcdefghijklmnopqrstuvwxyz '  # characters we care about (lowercase + space)
+    char_to_index = {char: i for i, char in enumerate(all_chars)}
 
-    def __repr__(self):
-        return "Beam(" + repr(list(self.get_elts_and_scores())) + ")"
+    features = []
+    for example in examples:
+        # Initialize a feature vector for each example
+        feature_vector = np.zeros(len(char_to_index))
 
-    def __str__(self):
-        return self.__repr__()
+        # Count the frequency of each character in the example
+        char_count = Counter(example)
 
-    def __len__(self):
-        return len(self.elts)
+        # Populate the feature vector with character counts
+        for char, count in char_count.items():
+            if char in char_to_index:
+                feature_vector[char_to_index[char]] = count
 
-    def add(self, elt, score):
-        """
-        Adds the element to the beam with the given score if the beam has room or if the score
-        is better than the score of the worst element currently on the beam
+        features.append(feature_vector)
 
-        :param elt: element to add
-        :param score: score corresponding to the element
-        """
-        if len(self.elts) == self.size and score < self.scores[-1]:
-            # Do nothing because this element is the worst
-            return
-        # If the list contains the item with a lower score, remove it
-        i = 0
-        while i < len(self.elts):
-            if self.elts[i] == elt and score > self.scores[i]:
-                del self.elts[i]
-                del self.scores[i]
-            i += 1
-        # If the list is empty, just insert the item
-        if len(self.elts) == 0:
-            self.elts.insert(0, elt)
-            self.scores.insert(0, score)
-        # Find the insertion point with binary search
-        else:
-            lb = 0
-            ub = len(self.scores) - 1
-            # We're searching for the index of the first element with score less than score
-            while lb < ub:
-                m = (lb + ub) // 2
-                # Check > because the list is sorted in descending order
-                if self.scores[m] > score:
-                    # Put the lower bound ahead of m because all elements before this are greater
-                    lb = m + 1
-                else:
-                    # m could still be the insertion point
-                    ub = m
-            # lb and ub should be equal and indicate the index of the first element with score less than score.
-            # Might be necessary to insert at the end of the list.
-            if self.scores[lb] > score:
-                self.elts.insert(lb + 1, elt)
-                self.scores.insert(lb + 1, score)
-            else:
-                self.elts.insert(lb, elt)
-                self.scores.insert(lb, score)
-            # Drop and item from the beam if necessary
-            if len(self.scores) > self.size:
-                self.elts.pop()
-                self.scores.pop()
-
-    def get_elts(self):
-        return self.elts
-
-    def get_elts_and_scores(self):
-        return zip(self.elts, self.scores)
-
-    def head(self):
-        return self.elts[0]
-
-
-##################
-# Tests
-def test_beam():
-    print("TESTING BEAM")
-    beam = Beam(3)
-    beam.add("a", 5)
-    beam.add("b", 7)
-    beam.add("c", 6)
-    beam.add("d", 4)
-    print("Should contain b, c, a: %s" % beam)
-    beam.add("e", 8)
-    beam.add("f", 6.5)
-    print("Should contain e, b, f: %s" % beam)
-    beam.add("f", 9.5)
-    print("Should contain f, e, b: %s" % beam)
-
-    beam = Beam(5)
-    beam.add("a", 5)
-    beam.add("b", 7)
-    beam.add("c", 6)
-    beam.add("d", 4)
-    print("Should contain b, c, a, d: %s" % beam)
-    beam.add("e", 8)
-    beam.add("f", 6.5)
-    print("Should contain e, b, f, c, a: %s" % beam)
-
-if __name__ == '__main__':
-    test_beam()
+    return np.array(features)
