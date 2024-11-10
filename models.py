@@ -111,7 +111,7 @@ def train_rnn_classifier(args, train_cons_exs, train_vowel_exs, dev_cons_exs, de
     embedding_dim = 32  # Dimensionality of the embedding layer
     hidden_dim = 74 # Number of units in the LSTM layer
     output_dim = 2  # Output dimensions (2 classes: consonant or vowel)
-    batch_size = 74 # Batch size for training
+    batch_size = 74# Batch size for training
     epochs = 10  # Number of training epochs
 
     # Initialize the RNN model
