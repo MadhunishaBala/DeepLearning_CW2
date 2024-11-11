@@ -169,7 +169,6 @@ def train_frequency_based_classifier(train_cons_exs, train_vowel_exs):
 # MODELS FOR PART 2 #
 #####################
 
-
 class LanguageModel(object):
 
     def get_log_prob_single(self, next_char, context):
@@ -228,4 +227,48 @@ def train_lm(args, train_text, dev_text, vocab_index):
     :param vocab_index: an Indexer of the character vocabulary (27 characters)
     :return: an RNNLanguageModel instance trained on the given data
     """
-    raise Exception("Implement me")
+    chunk_size = 100
+    batch_size = args.batch_size
+    num_epochs = args.epochs
+    learning_rate = args.learning_rate
+
+    # Initialized RNN model, loss, and optimizer
+    model = RNNLanguageModel(args.model_emb, args.model_dec, vocab_index)
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+
+    # Convert train_text to indices based on vocab_index
+    train_indices = [vocab_index.index_of(char) for char in train_text]
+
+    # Training loop
+    for epoch in range(num_epochs):
+        model.train()
+        hidden_state = None  # Initialize hidden state
+
+        # Chunk the data and loop over each chunk
+        for i in range(0, len(train_indices) - chunk_size, chunk_size):
+
+            chunk = train_indices[i:i + chunk_size]
+            input_seq = torch.tensor(chunk[:-1]).unsqueeze(0)  # Input up to the second last character
+            target_seq = torch.tensor(chunk[1:]).unsqueeze(0)
+
+            if hidden_state is None:
+                hidden_state = model.init_hidden(batch_size)
+            else:
+                hidden_state = hidden_state.detach()  # Detach hidden state to avoid backprop through entire history
+
+            optimizer.zero_grad()
+
+            # Forward pass through the model
+            output, hidden_state = model(input_seq, hidden_state)
+            output = output.view(-1, len(vocab_index))
+            target_seq = target_seq.view(-1)
+
+            # Calculate loss and perform backpropagation
+            loss = criterion(output, target_seq)
+            loss.backward()
+            optimizer.step()
+
+        print(f"Epoch {epoch + 1}/{num_epochs}, Loss: {loss.item()}")
+
+    return model
