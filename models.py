@@ -6,8 +6,10 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score
 from utils import get_frequency_features
 
-# Set device for computation (use GPU if available, else fallback to CPU)
+
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+
 
 class Indexer:
     def __init__(self):
@@ -45,6 +47,7 @@ class FrequencyClassifier:
         return int(self.classifier.predict(features)[0])
 
 # RNN-Based Model: A classifier using a Recurrent Neural Network (RNN) architecture
+
 class RNNClassifier(nn.Module):
     def __init__(self, vocab_size, embedding_dim, hidden_dim, output_dim):
         super(RNNClassifier, self).__init__()
@@ -57,11 +60,9 @@ class RNNClassifier(nn.Module):
         rnn_out, _ = self.rnn(embedded)
         output = self.fc(rnn_out[:, -1, :])
         return output
-
 def train_rnn_classifier(args, train_cons_exs, train_vowel_exs, dev_cons_exs, dev_vowel_exs, vocab_index):
-    hidden_dim = 128  # or try 32, 64
-    embedding_dim = 64  # or try 16, 32
-
+    hidden_dim = 128
+    embedding_dim = 64
     output_dim = 2
     batch_size = 54
     epochs = 50
@@ -73,7 +74,6 @@ def train_rnn_classifier(args, train_cons_exs, train_vowel_exs, dev_cons_exs, de
     vowel_indices = [torch.tensor([vocab_index.add_and_get_index(char) for char in ex], dtype=torch.long) for ex in train_vowel_exs]
     all_data = cons_indices + vowel_indices
     all_labels = [0] * len(cons_indices) + [1] * len(vowel_indices)
-
     train_data = torch.utils.data.TensorDataset(torch.nn.utils.rnn.pad_sequence(all_data, batch_first=True),
                                                 torch.tensor(all_labels, dtype=torch.long))
     train_loader = torch.utils.data.DataLoader(train_data, batch_size=batch_size, shuffle=True)
