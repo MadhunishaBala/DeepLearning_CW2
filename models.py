@@ -199,7 +199,7 @@ class RNNLanguageModel(LanguageModel):
         raise Exception("Implement me")
 
 
-def train_lm(args, train_text, dev_text, vocab_index):
+def train_lm(args, train_text, dev_text, vocab_index): #training
     """
     :param args: command-line args, passed through here for your convenience
     :param train_text: train text as a sequence of characters
