@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 import torch.nn as nn
+import torch.optim as optim
 
 # constants
 VOCAB_SIZE = 27  # Lowercase letters (a-z) + space
@@ -46,3 +47,20 @@ class RNNClassifier(nn.Module):
         _, hidden = self.rnn(embedded)  
         output = self.fc(hidden[-1])  
         return output
+
+# Training loop
+def train_rnn_classifier(train_data, train_labels, model, criterion, optimizer):
+    model.train()
+    for epoch in range(NUM_EPOCHS):
+        for i in range(0, len(train_data), BATCH_SIZE):
+            batch_data = train_data[i:i+BATCH_SIZE]
+            batch_labels = train_labels[i:i+BATCH_SIZE]
+
+            # Zero gradients, forward pass, backward pass, optimize
+            optimizer.zero_grad()
+            output = model(batch_data)
+            loss = criterion(output, batch_labels)
+            loss.backward()
+            optimizer.step()
+
+        print(f'Epoch {epoch+1}/{NUM_EPOCHS}, Loss: {loss.item()}')
