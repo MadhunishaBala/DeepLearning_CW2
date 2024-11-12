@@ -64,3 +64,21 @@ def train_rnn_classifier(train_data, train_labels, model, criterion, optimizer):
             optimizer.step()
 
         print(f'Epoch {epoch+1}/{NUM_EPOCHS}, Loss: {loss.item()}')
+
+# Model evaluation function
+def evaluate_model(test_data, test_labels, model):
+    model.eval()
+    with torch.no_grad():
+        correct = 0
+        total = 0
+        for i in range(0, len(test_data), BATCH_SIZE):
+            batch_data = test_data[i:i+BATCH_SIZE]
+            batch_labels = test_labels[i:i+BATCH_SIZE]
+            output = model(batch_data)
+            predicted = torch.argmax(output, dim=1)
+            total += batch_labels.size(0)
+            correct += (predicted == batch_labels).sum().item()
+
+        accuracy = correct / total
+        print(f'Accuracy: {accuracy * 100:.2f}%')
+        return accuracy
