@@ -82,3 +82,20 @@ def evaluate_model(test_data, test_labels, model):
         accuracy = correct / total
         print(f'Accuracy: {accuracy * 100:.2f}%')
         return accuracy
+
+
+# Loading the data for training and testing
+train_data, train_labels = preprocess_data('train-vowel-examples.txt')
+test_data, test_labels = preprocess_data('dev-vowel-examples.txt')
+
+# Initialize the model, loss function, and optimizer
+model = RNNClassifier(VOCAB_SIZE, EMBEDDING_DIM, HIDDEN_SIZE)
+criterion = nn.CrossEntropyLoss()  # CrossEntropyLoss for binary classification
+optimizer = optim.Adam(model.parameters(), lr=0.001)
+
+# Train the model
+train_rnn_classifier(train_data, train_labels, model, criterion, optimizer)
+
+# Evaluate the model
+evaluate_model(test_data, test_labels, model)
+
