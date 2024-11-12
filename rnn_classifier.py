@@ -1,5 +1,6 @@
 import torch
 import numpy as np
+import torch.nn as nn
 
 # constants
 VOCAB_SIZE = 27  # Lowercase letters (a-z) + space
@@ -31,3 +32,17 @@ def preprocess_data(filename):
             label = 1 if next_char in VOWELS else 0  # 1 for vowels, 0 for consonants
             labels.append(label)
     return torch.tensor(sequences), torch.tensor(labels)
+
+# RNN Model for classification
+class RNNClassifier(nn.Module):
+    def __init__(self, vocab_size, embedding_dim, hidden_size):
+        super(RNNClassifier, self).__init__()
+        self.embedding = nn.Embedding(vocab_size, embedding_dim)  
+        self.rnn = nn.GRU(embedding_dim, hidden_size, batch_first=True)  
+        self.fc = nn.Linear(hidden_size, 2)  
+
+    def forward(self, x):
+        embedded = self.embedding(x)  
+        _, hidden = self.rnn(embedded)  
+        output = self.fc(hidden[-1])  
+        return output
