@@ -1,9 +1,10 @@
+#models.py
+
+import numpy as np
 import torch
+import collections
 import torch.nn as nn
 import torch.optim as optim
-import numpy as np
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score
 
 
 #####################
@@ -35,150 +36,132 @@ class FrequencyBasedClassifier(ConsonantVowelClassifier):
         else:
             return 1
 
-
-
-class Indexer:
-    def __init__(self):
-        self.obj_to_idx = {}
-        self.idx_to_obj = []
-
-    def add_and_get_index(self, obj):
-        if obj not in self.obj_to_idx:
-            self.obj_to_idx[obj] = len(self.idx_to_obj)
-            self.idx_to_obj.append(obj)
-        return self.obj_to_idx[obj]
-
-    def get_index(self, obj):
-        # Return the index of the object if it exists, otherwise -1 (or some default behavior)
-        return self.obj_to_idx.get(obj, -1)
-
-    def __len__(self):
-        return len(self.idx_to_obj)
-
-
-# Frequency-Based Model: A classifier based on frequency of characters
-class FrequencyClassifier:
-    def __init__(self):
-        self.classifier = LogisticRegression(max_iter=1000)
-
-    def fit(self, train_cons_exs, train_vowel_exs):
-        cons_freq_features = get_frequency_features(train_cons_exs)
-        vowel_freq_features = get_frequency_features(train_vowel_exs)
-        X_train = np.concatenate((cons_freq_features, vowel_freq_features), axis=0)
-        y_train = np.concatenate((np.zeros(len(cons_freq_features)), np.ones(len(vowel_freq_features))), axis=0)
-        self.classifier.fit(X_train, y_train)
-
-    def predict(self, text):
-        features = get_frequency_features([text])
-        return int(self.classifier.predict(features)[0])
-
-# RNN-Based Model: A classifier using a Recurrent Neural Network (RNN) architecture
-
-class RNNClassifier(nn.Module):
-    def __init__(self, vocab_size, embedding_dim, hidden_dim, output_dim):
+class RNNClassifier(ConsonantVowelClassifier, nn.Module):
+    def __init__(self, vocab_size, embedding_dim, hidden_dim, output_dim, vocab_index, num_layers, dropout, bidirectional):
         super(RNNClassifier, self).__init__()
         self.embedding = nn.Embedding(vocab_size, embedding_dim)
-        self.rnn = nn.LSTM(embedding_dim, hidden_dim, batch_first=True)
-        self.fc = nn.Linear(hidden_dim, output_dim)
+        # Use GRU with dropout and optionally bidirectional
+        self.gru = nn.GRU(embedding_dim, hidden_dim, num_layers=num_layers, dropout=dropout,
+                          bidirectional=bidirectional, batch_first=True)
+        self.fc = nn.Linear(hidden_dim * (2 if bidirectional else 1), output_dim)  # Adjust for bidirectional GRU
+        self.vocab_index = vocab_index  # Store vocab_index within the model
 
-    def forward(self, x):
-        embedded = self.embedding(x)
-        rnn_out, _ = self.rnn(embedded)
-        output = self.fc(rnn_out[:, -1, :])
-        return output
+    def forward(self, context_tensor):
+        embedded = self.embedding(context_tensor)  # Get embeddings for the input sequence
+        _, hidden = self.gru(embedded)  # Output hidden state of GRU
+        # If bidirectional, concatenate the last hidden states of both directions
+        if isinstance(hidden, tuple):  # For GRU with num_layers > 1
+            hidden = hidden[0]
+        output = self.fc(hidden[-1])  # Feed the last hidden state to the FC layer
+        return output  # Return logits (no softmax here)
+
+    def predict(self, context):
+        # Convert context string to indices
+        context_indices = torch.tensor(
+            [self.vocab_index.index_of(char) for char in context],
+            dtype=torch.long
+        ).unsqueeze(0)  # Add batch dimension
+        output = self.forward(context_indices)
+        prediction = torch.argmax(output, dim=1).item()  # Get the predicted class
+        return prediction
+
+def train_frequency_based_classifier(cons_exs, vowel_exs):
+    consonant_counts = collections.Counter()
+    vowel_counts = collections.Counter()
+    for ex in cons_exs:
+        consonant_counts[ex[-1]] += 1
+    for ex in vowel_exs:
+        vowel_counts[ex[-1]] += 1
+    return FrequencyBasedClassifier(consonant_counts, vowel_counts)
+
 def train_rnn_classifier(args, train_cons_exs, train_vowel_exs, dev_cons_exs, dev_vowel_exs, vocab_index):
-    hidden_dim = 128
-    embedding_dim = 64
-    output_dim = 2
-    batch_size = 54
-    epochs = 50
+    # Set default model parameters inside the function
+    embedding_dim = 50
+    hidden_dim = 50
+    learning_rate = 0.001
+    num_epochs = 10
+    output_dim = 2  # Consonant or Vowel
 
+
+    batch_size = 64
+    num_layers = 2
+    dropout = 0.5
+    bidirectional = False
+
+    # Get the vocab size
     vocab_size = len(vocab_index)
-    model = RNNClassifier(vocab_size, embedding_dim, hidden_dim, output_dim).to(device)
 
-    cons_indices = [torch.tensor([vocab_index.add_and_get_index(char) for char in ex], dtype=torch.long) for ex in train_cons_exs]
-    vowel_indices = [torch.tensor([vocab_index.add_and_get_index(char) for char in ex], dtype=torch.long) for ex in train_vowel_exs]
-    all_data = cons_indices + vowel_indices
-    all_labels = [0] * len(cons_indices) + [1] * len(vowel_indices)
-    train_data = torch.utils.data.TensorDataset(torch.nn.utils.rnn.pad_sequence(all_data, batch_first=True),
-                                                torch.tensor(all_labels, dtype=torch.long))
-    train_loader = torch.utils.data.DataLoader(train_data, batch_size=batch_size, shuffle=True)
+    # Initialize the model
+    model = RNNClassifier(vocab_size, embedding_dim, hidden_dim, output_dim, vocab_index,
+                          num_layers=num_layers, dropout=dropout, bidirectional=bidirectional)
 
+    # Prepare training data
+    train_data = [(ex, 0) for ex in train_cons_exs] + [(ex, 1) for ex in train_vowel_exs]
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters())
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
-    # Training loop with loss and accuracy tracking
-    for epoch in range(epochs):
+    # Convert data to batches
+    def get_batches(data, batch_size):
+        # Shuffle data and create batches
+        np.random.shuffle(data)
+        for i in range(0, len(data), batch_size):
+            batch = data[i:i + batch_size]
+            contexts, labels = zip(*batch)
+            contexts_tensor = torch.tensor([[vocab_index.index_of(char) for char in context] for context in contexts], dtype=torch.long)
+            labels_tensor = torch.tensor(labels, dtype=torch.long)
+            yield contexts_tensor, labels_tensor
+
+    # Training loop
+    for epoch in range(num_epochs):
         model.train()
         total_loss = 0
-        for texts, labels in train_loader:
-            texts = texts.to(device)
-            labels = labels.to(device)
-
+        correct = 0
+        total = 0
+        for context_tensor, label_tensor in get_batches(train_data, batch_size):
             optimizer.zero_grad()
-            outputs = model(texts)
-            loss = criterion(outputs, labels)
+            output = model(context_tensor)
+            loss = criterion(output, label_tensor)
             loss.backward()
             optimizer.step()
-
             total_loss += loss.item()
 
-        avg_loss = total_loss / len(train_loader)
-        print(f"Epoch {epoch+1}/{epochs}, Loss: {avg_loss:.4f}")
+            # Calculate accuracy
+            _, predicted = torch.max(output, 1)
+            correct += (predicted == label_tensor).sum().item()
+            total += label_tensor.size(0)
 
-    # Evaluate the model on training and test sets after training
-    model.eval()
-    with torch.no_grad():
-        # Training set evaluation
-        train_preds, train_labels = [], []
-        for texts, labels in train_loader:
-            texts = texts.to(device)
-            outputs = model(texts)
-            _, predicted = torch.max(outputs, 1)
-            train_preds.extend(predicted.cpu().numpy())
-            train_labels.extend(labels.cpu().numpy())
+        # Calculate and print training accuracy
+        accuracy = 100 * correct / total
+        print(f"Epoch {epoch + 1}/{num_epochs}, Loss: {total_loss:.4f}, Accuracy: {accuracy:.2f}%")
 
-        train_accuracy = accuracy_score(train_labels, train_preds)
-        print(f"Training Accuracy: {train_accuracy:.4f}")
+        # Validation after each epoch
+        model.eval()  # Set the model to evaluation mode
+        with torch.no_grad():  # Disable gradient calculation for validation
+            correct = 0
+            total = 0
+            for context, label in zip(dev_cons_exs + dev_vowel_exs, [0] * len(dev_cons_exs) + [1] * len(dev_vowel_exs)):
+                context_indices = torch.tensor([vocab_index.index_of(char) for char in context], dtype=torch.long).unsqueeze(0)
+                output = model(context_indices)  # No need to worry about GPU here
 
-        # Testing set evaluation
-        dev_cons_indices = [torch.tensor([vocab_index.add_and_get_index(char) for char in ex], dtype=torch.long) for ex in dev_cons_exs]
-        dev_vowel_indices = [torch.tensor([vocab_index.add_and_get_index(char) for char in ex], dtype=torch.long) for ex in dev_vowel_exs]
-        dev_data = dev_cons_indices + dev_vowel_indices
-        dev_labels = [0] * len(dev_cons_indices) + [1] * len(dev_vowel_indices)
+                _, predicted = torch.max(output, 1)
 
-        dev_data = torch.nn.utils.rnn.pad_sequence(dev_data, batch_first=True)
-        dev_data = dev_data.to(device)
-        dev_labels = torch.tensor(dev_labels, dtype=torch.long).to(device)
+                # Convert label to a tensor before comparison
+                label_tensor = torch.tensor([label], dtype=torch.long)
 
-        outputs = model(dev_data)
-        _, dev_preds = torch.max(outputs, 1)
-        test_accuracy = accuracy_score(dev_labels.cpu(), dev_preds.cpu())
-        print(f"Testing Accuracy: {test_accuracy:.4f}")
+                correct += (predicted == label_tensor).sum().item()
+                total += label_tensor.size(0)  # Now label_tensor is a tensor, so .size(0) works
 
-    return model
+            # Calculate and print validation accuracy
+            val_accuracy = 100 * correct / total
+            print(f"Validation Accuracy: {val_accuracy:.2f}%")
 
-
-def train_frequency_based_classifier(train_cons_exs, train_vowel_exs):
-    """
-    Train the frequency-based classifier using the provided training data.
-
-    :param train_cons_exs: List of training examples for consonants
-    :param train_vowel_exs: List of training examples for vowels
-    :return: Trained frequency-based classifier
-    """
-    model = FrequencyClassifier()  # Initialize the frequency classifier
-    model.fit(train_cons_exs, train_vowel_exs)  # Train the classifier
     return model
 
 #####################
 # MODELS FOR PART 2 #
 #####################
 
-import torch
-import torch.nn as nn
-import torch.optim as optim
-import numpy as np
+
 import argparse
 
 # Task 2: Language Model (Base Class)
