@@ -205,10 +205,28 @@ class RNNLanguageModel(LanguageModel):
         return output, hidden_state
 
     def get_log_prob_single(self, next_char, context):
-        pass
+        # Calculate the log probability of a single character given the context
+        context_indices = [self.vocab_index.index_of(char) for char in context]
+        context_tensor = torch.tensor(context_indices, dtype=torch.long).unsqueeze(0)
+        next_char_index = self.vocab_index.index_of(next_char)
+        with torch.no_grad():
+            hidden_state = self.init_hidden(1)
+            output, _ = self.forward(context_tensor, hidden_state)
+            output = output[:, -1, :]
+        log_probs = torch.log_softmax(output, dim=1)
+        log_prob = log_probs[0, next_char_index].item()
+        return log_prob
 
     def get_log_prob_sequence(self, next_chars, context):
-        pass
+        # Calculating the log probability of a sequence of characters given the context
+        total_log_prob = 0.0
+        current_context = context
+        for char in next_chars:
+            log_prob = self.get_log_prob_single(char, current_context)
+            total_log_prob += log_prob
+            current_context += char
+        return total_log_prob
+
 
 # Task 2: Parse Arguments for Command-Line Execution
 def parse_args():
@@ -385,3 +403,5 @@ def evaluate_perplexity_and_likelihood(model, test_data):
     perplexity = np.exp(-avg_log_likelihood)
 
     return log_prob_sum, avg_log_likelihood, perplexity
+
+
