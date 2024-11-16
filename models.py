@@ -6,7 +6,34 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score
 
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+#####################
+# MODELS FOR PART 1 #
+#####################
+
+class ConsonantVowelClassifier(object):
+    def predict(self, context):
+        """
+        :param context:
+        :return: 1 if vowel, 0 if consonant
+        """
+        raise Exception("Only implemented in subclasses")
+
+
+class FrequencyBasedClassifier(ConsonantVowelClassifier):
+    """
+    Classifier based on the last letter before the space. If it has occurred with more consonants than vowels,
+    classify as consonant, otherwise as vowel.
+    """
+    def __init__(self, consonant_counts, vowel_counts):
+        self.consonant_counts = consonant_counts
+        self.vowel_counts = vowel_counts
+
+    def predict(self, context):
+        # Look two back to find the letter before the space
+        if self.consonant_counts[context[-1]] > self.vowel_counts[context[-1]]:
+            return 0
+        else:
+            return 1
 
 
 
