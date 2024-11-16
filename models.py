@@ -387,21 +387,13 @@ def evaluate_perplexity_and_likelihood(model, test_data):
     log_prob_sum = 0
     token_count = 0
 
-    # Iterate over each token in the test data
     for i in range(1, len(test_data)):
-        # Calculate probability of current token given previous tokens
-        prob = model.predict(test_data[:i], test_data[i])
-
-        # Add log probability to the sum
+        prob = model.get_log_prob_single(test_data[i], test_data[:i])
         log_prob_sum += np.log(prob)
         token_count += 1
 
-    # Calculate average log likelihood
     avg_log_likelihood = log_prob_sum / token_count
-
-    # Calculate perplexity
     perplexity = np.exp(-avg_log_likelihood)
-
     return log_prob_sum, avg_log_likelihood, perplexity
 
 
