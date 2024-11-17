@@ -185,12 +185,12 @@ class UniformLanguageModel(LanguageModel):
         return np.log(1.0/self.voc_size) * len(next_chars)
 
 
-class RNNLanguageModel(nn.Module):  # Inherit from nn.Module
+class RNNLanguageModel(LanguageModel,nn.Module):  # Inherit from nn.Module
     def __init__(self, emb_dim, hidden_dim, vocab_index):
         super(RNNLanguageModel, self).__init__()
         self.vocab_size = len(vocab_index)
         self.embedding = nn.Embedding(self.vocab_size, emb_dim)
-        self.rnn = nn.LSTM(emb_dim, hidden_dim, batch_first=True)
+        self.rnn = nn.GRU(emb_dim, hidden_dim, batch_first=True)
         self.fc = nn.Linear(hidden_dim, self.vocab_size)
         self.vocab_index = vocab_index
 
@@ -201,8 +201,7 @@ class RNNLanguageModel(nn.Module):  # Inherit from nn.Module
         return output, hidden_state
 
     def init_hidden(self, batch_size):
-        return (torch.zeros(1, batch_size, self.rnn.hidden_size),
-                torch.zeros(1, batch_size, self.rnn.hidden_size))
+        return torch.zeros(1, batch_size, self.rnn.hidden_size)
 
     def get_log_prob_single(self, next_char, context):
         context_indices = [self.vocab_index.index_of(char) for char in context]
@@ -224,9 +223,6 @@ class RNNLanguageModel(nn.Module):  # Inherit from nn.Module
             current_context += char
         return total_log_prob
 
-
-
-
 def train_lm(args, train_text, dev_text, vocab_index):
     emb_dim = 50
     hidden_dim = 128
@@ -235,7 +231,7 @@ def train_lm(args, train_text, dev_text, vocab_index):
     batch_size = 32
     learning_rate = 0.001
 
-    # Initialize the model, optimizer, and loss criterion
+    # Initialize the model, optimizer, and loss
     model = RNNLanguageModel(emb_dim, hidden_dim, vocab_index)
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     criterion = nn.CrossEntropyLoss()
@@ -249,27 +245,38 @@ def train_lm(args, train_text, dev_text, vocab_index):
         hidden_state = model.init_hidden(batch_size)
 
         # Training loop
+        correct_train = 0
+        total_train = 0
         for i in range(0, len(train_indices) - chunk_size, chunk_size):
             chunk = train_indices[i:i + chunk_size]
             input_seq = torch.tensor(chunk[:-1]).unsqueeze(0).repeat(batch_size, 1)  # [batch_size, seq_len]
             target_seq = torch.tensor(chunk[1:]).unsqueeze(0).repeat(batch_size, 1)  # [batch_size, seq_len]
 
-            hidden_state = (hidden_state[0].detach(), hidden_state[1].detach())  # Detach to prevent backprop through history
+            hidden_state = hidden_state.detach()  # Detach only the hidden state for GRU
             optimizer.zero_grad()
 
-            # Forward pass
             output, hidden_state = model(input_seq, hidden_state)
+
+            # Calculate the number of correct predictions
+            _, predicted = torch.max(output, dim=2)
+            correct_train += (predicted == target_seq).sum().item()
+            total_train += target_seq.numel()
 
             # Reshape for CrossEntropyLoss
             loss = criterion(output.view(-1, model.vocab_size), target_seq.view(-1))  # Flatten output and target
             loss.backward()
             optimizer.step()
 
+        # Calculate training accuracy for the epoch
+        train_accuracy = 100 * correct_train / total_train
+
         # After each epoch, evaluate on the development set
         model.eval()  # Set the model to evaluation mode
         with torch.no_grad():
             hidden_state = model.init_hidden(batch_size)
             dev_loss = 0.0
+            correct_dev = 0
+            total_dev = 0
             for i in range(0, len(dev_indices) - chunk_size, chunk_size):
                 chunk = dev_indices[i:i + chunk_size]
                 input_seq = torch.tensor(chunk[:-1]).unsqueeze(0).repeat(batch_size, 1)  # [batch_size, seq_len]
@@ -279,10 +286,19 @@ def train_lm(args, train_text, dev_text, vocab_index):
                 loss = criterion(output.view(-1, model.vocab_size), target_seq.view(-1))  # Flatten output and target
                 dev_loss += loss.item()
 
+                # Calculate the number of correct predictions for the dev set
+                _, predicted = torch.max(output, dim=2)
+                correct_dev += (predicted == target_seq).sum().item()
+                total_dev += target_seq.numel()
+
+            # Calculate dev accuracy for the epoch
+            dev_accuracy = 100 * correct_dev / total_dev
             dev_loss /= (len(dev_indices) // chunk_size)  # Average loss over all chunks in dev set
-            print(f"Epoch {epoch + 1}/{num_epochs}, Train Loss: {loss.item():.4f}, Dev Loss: {dev_loss:.4f}")
+            print(f"Epoch {epoch + 1}/{num_epochs}, Train Loss: {loss.item():.4f}, Train Accuracy: {train_accuracy:.2f}%, Dev Loss: {dev_loss:.4f}, Dev Accuracy: {dev_accuracy:.2f}%")
 
     return model
+
+
 
 
 
