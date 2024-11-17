@@ -7,6 +7,7 @@ import torch.nn as nn
 import torch.optim as optim
 
 
+
 #####################
 # MODELS FOR PART 1 #
 #####################
@@ -143,6 +144,7 @@ def train_rnn_classifier(args, train_cons_exs, train_vowel_exs, dev_cons_exs, de
     return model
 
 
+
 #####################
 # MODELS FOR PART 2 #
 #####################
@@ -183,115 +185,107 @@ class UniformLanguageModel(LanguageModel):
         return np.log(1.0/self.voc_size) * len(next_chars)
 
 
-class RNNLanguageModel(LanguageModel, nn.Module):
-    def __init__(self, vocab_size, embedding_dim, hidden_dim, num_layers, dropout, vocab_index):
+class RNNLanguageModel(nn.Module):  # Inherit from nn.Module
+    def __init__(self, emb_dim, hidden_dim, vocab_index):
         super(RNNLanguageModel, self).__init__()
-        self.embedding = nn.Embedding(vocab_size, embedding_dim)
-        self.rnn = nn.GRU(
-            embedding_dim,
-            hidden_dim,
-            num_layers=num_layers,
-            dropout=dropout,
-            batch_first=True,
-        )
-        self.fc = nn.Linear(hidden_dim, vocab_size)  # Output is logits for each character
+        self.vocab_size = len(vocab_index)
+        self.embedding = nn.Embedding(self.vocab_size, emb_dim)
+        self.rnn = nn.LSTM(emb_dim, hidden_dim, batch_first=True)
+        self.fc = nn.Linear(hidden_dim, self.vocab_size)
         self.vocab_index = vocab_index
 
-    def forward(self, context_tensor):
-        embeddings = self.embedding(context_tensor)  # [batch_size, seq_len, embedding_dim]
-        rnn_out, _ = self.rnn(embeddings)  # [batch_size, seq_len, hidden_dim]
-        logits = self.fc(rnn_out)  # [batch_size, seq_len, vocab_size]
-        return logits  # Return logits for every character in the sequence
+    def forward(self, input_seq, hidden_state):
+        embedded = self.embedding(input_seq)
+        rnn_out, hidden_state = self.rnn(embedded, hidden_state)
+        output = self.fc(rnn_out)
+        return output, hidden_state
+
+    def init_hidden(self, batch_size):
+        return (torch.zeros(1, batch_size, self.rnn.hidden_size),
+                torch.zeros(1, batch_size, self.rnn.hidden_size))
 
     def get_log_prob_single(self, next_char, context):
-        # Convert context to indices and predict probabilities
-        context_indices = torch.tensor(
-            [self.vocab_index.index_of(c) for c in context], dtype=torch.long
-        ).unsqueeze(0)  # Add batch dimension
-        logits = self.forward(context_indices)
+        context_indices = [self.vocab_index.index_of(char) for char in context]
+        context_tensor = torch.tensor(context_indices, dtype=torch.long).unsqueeze(0)
         next_char_index = self.vocab_index.index_of(next_char)
-        log_prob = torch.log_softmax(logits[:, -1, :], dim=-1)  # Use last character output
-        return log_prob[0, next_char_index].item()
+        with torch.no_grad():
+            hidden_state = self.init_hidden(1)
+            output, _ = self.forward(context_tensor, hidden_state)
+            output = output[:, -1, :]
+        log_probs = torch.log_softmax(output, dim=1)
+        return log_probs[0, next_char_index].item()
 
     def get_log_prob_sequence(self, next_chars, context):
-        log_prob_sum = 0.0
-        for next_char in next_chars:
-            log_prob_sum += self.get_log_prob_single(next_char, context)
-            context += next_char  # Update context with predicted char
-        return log_prob_sum
+        total_log_prob = 0.0
+        current_context = context
+        for char in next_chars:
+            log_prob = self.get_log_prob_single(char, current_context)
+            total_log_prob += log_prob
+            current_context += char
+        return total_log_prob
+
 
 
 
 def train_lm(args, train_text, dev_text, vocab_index):
-    """
-    :param args: command-line args, passed through here for your convenience
-    :param train_text: train text as a sequence of characters
-    :param dev_text: dev texts as a sequence of characters
-    :param vocab_index: an Indexer of the character vocabulary (27 characters)
-    :return: an RNNLanguageModel instance trained on the given data
-    """
-def train_lm(args, train_text, dev_text, vocab_index):
-    # Hyperparameters
-    embedding_dim = 50
-    hidden_dim = 100
-    num_layers = 2
-    dropout = 0.5
-    batch_size = 64
+    emb_dim = 50
+    hidden_dim = 128
+    chunk_size = 100
     num_epochs = 10
+    batch_size = 32
     learning_rate = 0.001
-    seq_length = 30
 
-    vocab_size = len(vocab_index)
-    model = RNNLanguageModel(vocab_size, embedding_dim, hidden_dim, num_layers, dropout, vocab_index)
-
-    criterion = nn.CrossEntropyLoss()
+    # Initialize the model, optimizer, and loss criterion
+    model = RNNLanguageModel(emb_dim, hidden_dim, vocab_index)
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    criterion = nn.CrossEntropyLoss()
 
-    def create_batches(text, seq_length, batch_size):
-        text_indices = [vocab_index.index_of(char) for char in text]
-        num_batches = (len(text_indices) - 1) // (seq_length * batch_size)
-        for i in range(num_batches):
-            start_idx = i * seq_length * batch_size
-            inputs = torch.tensor(
-                text_indices[start_idx:start_idx + seq_length * batch_size]
-            ).view(batch_size, seq_length)
-            targets = torch.tensor(
-                text_indices[start_idx + 1:start_idx + seq_length * batch_size + 1]
-            ).view(batch_size, seq_length)
-            yield inputs, targets
+    # Convert train text to indices
+    train_indices = [vocab_index.index_of(c) for c in train_text]
+    dev_indices = [vocab_index.index_of(c) for c in dev_text]
 
     for epoch in range(num_epochs):
-        model.train()
-        total_loss = 0
-        for inputs, targets in create_batches(train_text, seq_length, batch_size):
+        model.train()  # Set the model to training mode
+        hidden_state = model.init_hidden(batch_size)
+
+        # Training loop
+        for i in range(0, len(train_indices) - chunk_size, chunk_size):
+            chunk = train_indices[i:i + chunk_size]
+            input_seq = torch.tensor(chunk[:-1]).unsqueeze(0).repeat(batch_size, 1)  # [batch_size, seq_len]
+            target_seq = torch.tensor(chunk[1:]).unsqueeze(0).repeat(batch_size, 1)  # [batch_size, seq_len]
+
+            hidden_state = (hidden_state[0].detach(), hidden_state[1].detach())  # Detach to prevent backprop through history
             optimizer.zero_grad()
-            logits = model(inputs)
-            loss = criterion(logits.view(-1, vocab_size), targets.view(-1))
+
+            # Forward pass
+            output, hidden_state = model(input_seq, hidden_state)
+
+            # Reshape for CrossEntropyLoss
+            loss = criterion(output.view(-1, model.vocab_size), target_seq.view(-1))  # Flatten output and target
             loss.backward()
             optimizer.step()
-            total_loss += loss.item()
 
-        avg_loss = total_loss / len(train_text)
-        print(f"Epoch {epoch + 1}, Loss: {avg_loss:.4f}")
-
-        # Validation
-        model.eval()
-        val_batches = list(create_batches(dev_text, seq_length, batch_size))
-        if len(val_batches) == 0:  # Handle empty validation batches
-            print(f"Epoch {epoch + 1}, No validation data available.")
-            continue
-
+        # After each epoch, evaluate on the development set
+        model.eval()  # Set the model to evaluation mode
         with torch.no_grad():
-            val_loss = 0
-            for inputs, targets in val_batches:
-                logits = model(inputs)
-                loss = criterion(logits.view(-1, vocab_size), targets.view(-1))
-                val_loss += loss.item()
-            avg_val_loss = val_loss / len(val_batches)
-            perplexity = torch.exp(torch.tensor(avg_val_loss))
-            print(f"Validation Loss: {avg_val_loss:.4f}, Perplexity: {perplexity:.4f}")
+            hidden_state = model.init_hidden(batch_size)
+            dev_loss = 0.0
+            for i in range(0, len(dev_indices) - chunk_size, chunk_size):
+                chunk = dev_indices[i:i + chunk_size]
+                input_seq = torch.tensor(chunk[:-1]).unsqueeze(0).repeat(batch_size, 1)  # [batch_size, seq_len]
+                target_seq = torch.tensor(chunk[1:]).unsqueeze(0).repeat(batch_size, 1)  # [batch_size, seq_len]
+
+                output, hidden_state = model(input_seq, hidden_state)
+                loss = criterion(output.view(-1, model.vocab_size), target_seq.view(-1))  # Flatten output and target
+                dev_loss += loss.item()
+
+            dev_loss /= (len(dev_indices) // chunk_size)  # Average loss over all chunks in dev set
+            print(f"Epoch {epoch + 1}/{num_epochs}, Train Loss: {loss.item():.4f}, Dev Loss: {dev_loss:.4f}")
 
     return model
+
+
+
 
 
 
